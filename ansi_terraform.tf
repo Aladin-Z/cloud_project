@@ -71,10 +71,10 @@ resource "null_resource" "key_move" {
 
 
 # Create instances 
-resource "aws_instance" "web-1" {
+resource "aws_instance" "server" {
     ami           = "ami-08c40ec9ead489470"
     instance_type = "t2.micro"
-    count = 2
+    count = 1
     key_name = aws_key_pair.generated_key.key_name
     vpc_security_group_ids = ["${aws_security_group.allow_tlss.id}"]
     timeouts {
@@ -98,6 +98,40 @@ resource "aws_instance" "web-1" {
     subnet_id = element(tolist(data.aws_subnet_ids.all.ids), 0)
     depends_on = [null_resource.key_move]
     provisioner "local-exec" { 
-    command = "ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i '${self.public_ip},' -u ubuntu --private-key ~/.ssh/generated_key.pem  ${path.module}/instance.ansible.yml" 
+    command = "ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i '${self.public_ip},' -u ubuntu --private-key ~/.ssh/generated_key.pem  ${path.module}/instance.ansible.master.yml" 
+  }
+}
+
+
+# Create instances 
+resource "aws_instance" "cluster-group" {
+    ami           = "ami-08c40ec9ead489470"
+    instance_type = "t2.micro"
+    count = 4
+    key_name = aws_key_pair.generated_key.key_name
+    vpc_security_group_ids = ["${aws_security_group.allow_tlss.id}"]
+    timeouts {
+      create= "1h30m"
+      update= "2h"
+      delete= "20m"
+    }
+
+    # retry connection until host is ready before starting ansible (if we dont do this ansible will timeout if it tries to connect before host is ready)
+    provisioner "remote-exec" {
+      inline = ["ls"]
+    }
+    connection {
+      host        = self.public_ip
+      agent       = false
+      type        = "ssh"
+      user        = "ubuntu"
+      timeout = "2m"
+      private_key = tls_private_key.generated_ssh.private_key_pem
+    }
+
+    subnet_id = element(tolist(data.aws_subnet_ids.all.ids), 0)
+    depends_on = [null_resource.key_move]
+    provisioner "local-exec" { 
+    command = "ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i '${self.public_ip},' -u ubuntu --private-key ~/.ssh/generated_key.pem  ${path.module}/instance.ansible.slave.yml" 
   }
 }
